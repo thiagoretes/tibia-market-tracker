@@ -5,6 +5,16 @@ from typing import *
 import screenshot
 import requests
 from datetime import datetime, timedelta
+import re
+
+
+class EventData:
+    def __init__(self, date: datetime, events: List[str]):
+        self.date = date
+        self.events = events
+
+    def __str__(self) -> str:
+        return f"{self.date.strftime('%Y.%m.%d')},{','.join(self.events)}"
 
 
 class MarketValues:
@@ -46,6 +56,52 @@ class Wiki:
                 break
 
         return sorted(set([item.split(" (")[0] for item in items]))
+
+    def get_events(self, after_date=None) -> List[EventData]:
+        """
+        Scrapes the event calendar from tibia.com and returns a list of EventData objects.
+        """
+        event_data: List[EventData] = []
+        response = requests.get("https://www.tibia.com/news/?subtopic=eventcalendar").text
+        events = response.split("\"eventscheduletable\"")[-1].split("</table>")[0].split("<td style")[1:]
+        events = [event.split("</td>")[0] for event in events]
+
+        today = datetime.today()
+        month_modifier = -1
+        today_reached = False
+        for event in events:
+            try:
+                day = int(re.search(">([0-9]{1,2}) </span", event).group(1))
+
+                # Event table can wrap to month before or next month, handle these cases.
+                if day <= today.day:
+                    month_modifier = 0
+                if not today_reached and day == today.day:
+                    today_reached = True
+                elif today_reached and month_modifier == 0 and day < today.day:
+                    month_modifier = 1
+
+                month = today.month + month_modifier
+
+                # Handle edge cases of changing year when covering multiple months.
+                year = today.year
+                if month == 12 and month_modifier == -1:
+                    year -=1
+                elif month == 1 and month_modifier == 1:
+                    year += 1
+
+                event_names = [event_name for event_name in [text.split(">")[-1] for text in event.split("</div>")[:-1]] if len(event_name) > 0]
+
+                data_datetime = datetime(year, month, day)
+                data = EventData(data_datetime, event_names)
+                
+                if after_date is None or data_datetime > after_date:
+                    event_data.append(data)
+
+            except Exception as e:
+                print(f"Parsing event info failed for {event}: {e}")
+        
+        return event_data
 
 class Client:
     def __init__(self):
