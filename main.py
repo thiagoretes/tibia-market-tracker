@@ -83,9 +83,13 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
     scanned_items = 0
     if os.path.exists(os.path.join(results_location, "fullscan_tmp.csv")):
         with open(os.path.join(results_location, "fullscan_tmp.csv"), "r") as f:
-            print("Previous run aborted, continuing where stopped.")
-            scanned_items = len(f.readlines()) - 1 # Don't count header.
+            print("Previous run aborted, continuing at last valid value.")
+            lines = f.readlines()
+            scanned_items = max([i for i, line in enumerate(lines) if "-1" not in line])
+            lines = [line for line in lines[:scanned_items + 1] if "," in line]
             fullscan_mode = "a+"
+        with open(os.path.join(results_location, "fullscan_tmp.csv"), "w") as f:
+            f.write("".join(lines))
 
     with open("tracked_items.txt", "r") as t:
         with open(os.path.join(results_location, "fullscan_tmp.csv"), fullscan_mode) as f:
@@ -93,7 +97,7 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
                 f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ApproxOffers\n")
                 
             for i, item in enumerate(t.readlines()):
-                if i + 1 < scanned_items or not item:
+                if i < scanned_items:
                     continue
 
                 # Restart Tibia every 13 minutes to avoid afk kick.
