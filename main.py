@@ -14,6 +14,27 @@ def write_marketable_items():
         for item in items:
             f.write(item + "\n")
 
+
+def write_events(results_location: str):
+    """
+    Writes all currently known events into the events.csv in the results_location.
+    """
+    try:
+        last_date = datetime.min
+
+        if os.path.exists(os.path.join(results_location, "events.csv")):
+            with open(os.path.join(results_location, "events.csv"), "r") as event_file:
+                previous_events = [event for event in event_file.readlines() if event and not str.isspace(event)]
+                if previous_events:
+                    last_date = datetime.strptime(previous_events[-1].split(",")[0], "%Y.%m.%d")
+
+        with open(os.path.join(results_location, "events.csv"), "a+") as event_file:
+            events = Wiki().get_events(last_date)
+            event_file.write("\n".join([event.__str__() for event in events]) + "\n")
+    except Exception as e:
+        print(f"Writing events failed: {e}")
+
+
 def observe_items(email: str, password: str, tibia_location: str, results_location: str):
     """
     Observes the time of day at which items are bought or sold.
@@ -72,6 +93,8 @@ def observe_items(email: str, password: str, tibia_location: str, results_locati
             
 
 def do_market_search(email: str, password: str, tibia_location: str, results_location: str):
+    write_events(results_location)
+
     client = Client()
     client.start_game(tibia_location)
     client.login_to_game(email, password)
