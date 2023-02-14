@@ -30,7 +30,8 @@ def write_events(results_location: str):
 
         with open(os.path.join(results_location, "events.csv"), "a+") as event_file:
             events = Wiki().get_events(last_date)
-            event_file.write("\n".join([event.__str__() for event in events]) + "\n")
+            if events:
+                event_file.write("\n".join([event.__str__() for event in events]) + "\n")
     except Exception as e:
         print(f"Writing events failed: {e}")
 
