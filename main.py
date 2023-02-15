@@ -155,7 +155,7 @@ if __name__ == "__main__":
     
     #schedule.every().day.at("10:15:00").do(lambda: observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     #observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
-    do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
+    #do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
 
     schedule.every().day.at("20:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     schedule.every().day.at("08:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))

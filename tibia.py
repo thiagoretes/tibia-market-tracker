@@ -273,7 +273,7 @@ class Client:
 
 
     def start_game(self, location:str):
-        self.tibia: subprocess.Popen = subprocess.Popen([location], user="may")
+        self.tibia: subprocess.Popen = subprocess.Popen([location])
         time.sleep(5)
 
         self._update_tibia()
@@ -386,7 +386,9 @@ class Client:
             pyautogui.hotkey("ctrl", "z")
             pyautogui.typewrite(name)
             pyautogui.press("down")
-            time.sleep(0.1)
+            
+            # Give Tibia some time to load new values.
+            time.sleep(0.2)
                 
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:
