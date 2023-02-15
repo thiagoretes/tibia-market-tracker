@@ -129,8 +129,11 @@ class MarketMemoryReader:
         self.buy_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         self.sell_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         
+        # Values to determine if current memory belongs to the current item.
         self.last_sell_times = [0 for i in range(16)]
         self.last_buy_times = [0 for i in range(16)]
+        self.last_expression = ""
+        
         self.has_finished_filtering = False
     
     def find_current_memory(self, buy_offer: int, sell_offer: int, max_buy_offer: int, max_sell_offer: int):
@@ -186,7 +189,7 @@ class MarketMemoryReader:
         self.sell_offer_reader.addresses.append(sell_offer_base - 24) # Timestamp.
         
         # Add more than 1st offers to memory reader.
-        for i in range(0, 16):
+        for i in range(0, 8):
             ith_buy_offer = [x + 48 * i for x in self.buy_offer_reader.addresses[:3]]
             ith_sell_offer = [x + 48 * i for x in self.sell_offer_reader.addresses[:3]]
             self.buy_offer_reader.addresses.extend(ith_buy_offer)
@@ -212,9 +215,20 @@ class MarketMemoryReader:
             MarketValues: The MarketValues for the current item.
         """
         max_bought, min_bought, total_bought_gold, amount_bought = self.buy_details_reader.read_values()
-        average_bought = total_bought_gold // amount_bought
+        average_bought = (total_bought_gold // amount_bought) if amount_bought > 0 else 0
         max_sold, min_sold, total_sold_gold, amount_sold = self.sell_details_reader.read_values()
-        average_sold = total_sold_gold // amount_sold
+        average_sold = (total_sold_gold // amount_sold) if amount_sold > 0 else 0
+        
+        current_expression = f"{max_bought},{min_bought},{total_bought_gold},{amount_bought},{average_bought}" +\
+                             f"{max_sold},{min_sold},{total_sold_gold},{amount_sold},{average_sold}" +\
+                             ",".join([str(x) for x in self.buy_offer_reader.read_values()]) +\
+                             ",".join([str(x) for x in self.sell_offer_reader.read_values()])
+        
+        # Check if this memory is a duplicate of the last item. If so, probably nonexistent item.
+        if current_expression == self.last_expression:
+            raise Exception("This item probably doesn't exist.")
+        else:
+            self.last_expression = current_expression
         
         buy_offer_values = self.buy_offer_reader.read_values()
         sell_offer_values = self.sell_offer_reader.read_values()
@@ -226,12 +240,14 @@ class MarketMemoryReader:
         if sell_timestamp == self.last_sell_times[0]:
             sell_offer = sell_amount = sell_timestamp = -1
         
+        self.last_expression = f"{max_bought},{min_bought},{total_bought_gold},{amount_bought},{average_bought}" +\
+                               f"{max_sold},{min_sold},{total_sold_gold},{amount_sold},{average_sold}"
         now_timestamp = (datetime.now() + timedelta(30)).timestamp()
         offers_within_24h = 0
         
-        for i in range(16):
-            buy_offer, buy_amount, buy_timestamp = buy_offer_values[i * 3 : (i + 1) * 3]
-            sell_offer, sell_amount, sell_timestamp = sell_offer_values[i * 3 : (i + 1) * 3]
+        for i in range(8):
+            b_, b__, buy_timestamp = buy_offer_values[i * 3 : (i + 1) * 3]
+            s_, s__, sell_timestamp = sell_offer_values[i * 3 : (i + 1) * 3]
             
             if buy_timestamp != self.last_buy_times[i]:
                 self.last_buy_times[i] = buy_timestamp
@@ -242,7 +258,7 @@ class MarketMemoryReader:
                 if (now_timestamp - sell_timestamp) < 86400:
                     offers_within_24h += 1
 
-        return (MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, -1), offers_within_24h)
+        return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, offers_within_24h)
 
 class Client:
     def __init__(self):
@@ -299,9 +315,6 @@ class Client:
         # Wait until ingame.
         self._wait_until_find("images/Ingame.png", cache=False)
         print("Ingame.")
-        
-        # Starting reader before login gets detected as debugger.
-        self.market_reader = MarketMemoryReader()
 
     def exit_tibia(self):
         """
@@ -314,6 +327,9 @@ class Client:
         """
         Searches for an empty depot, and opens the market on it.
         """
+        if not self.market_reader:
+            self.market_reader = MarketMemoryReader()
+            
         def try_open_market() -> bool:
             x, y = self._wait_until_find("images/SuccessDepotTile.png", timeout=5, cache=False)
             if x >= 0:
@@ -353,6 +369,14 @@ class Client:
                 break
             
             values = self.search_item(item)
+            print(len(self.market_reader.sell_offer_reader.addresses))
+            print(len(self.market_reader.buy_offer_reader.addresses))
+            print(len(self.market_reader.sell_details_reader.addresses))
+            print(len(self.market_reader.buy_details_reader.addresses))
+            print(values)
+            
+        # Fill memory with timestamps to know if an offer in memory still belongs to the current item.
+        self.search_item("tibia coins")
 
     def search_item(self, name: str) -> MarketValues:
         """
@@ -362,7 +386,7 @@ class Client:
             pyautogui.hotkey("ctrl", "z")
             pyautogui.typewrite(name)
             pyautogui.press("down")
-            time.sleep(0.2)
+            time.sleep(0.1)
                 
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:

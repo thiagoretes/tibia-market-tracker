@@ -101,28 +101,12 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
 
     afk_time = time.time()
     client.open_market()
-    
-    fullscan_mode = "w"
-    scanned_items = 0
-    if os.path.exists(os.path.join(results_location, "fullscan_tmp.csv")):
-        with open(os.path.join(results_location, "fullscan_tmp.csv"), "r") as f:
-            print("Previous run aborted, continuing at last valid value.")
-            lines = f.readlines()
-            scanned_items = max([i for i, line in enumerate(lines) if "-1" not in line])
-            lines = [line for line in lines[:scanned_items + 1] if "," in line]
-            fullscan_mode = "a+"
-        with open(os.path.join(results_location, "fullscan_tmp.csv"), "w") as f:
-            f.write("".join(lines))
 
     with open("tracked_items.txt", "r") as t:
-        with open(os.path.join(results_location, "fullscan_tmp.csv"), fullscan_mode) as f:
-            if scanned_items == 0:
-                f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ApproxOffers\n")
+        with open(os.path.join(results_location, "fullscan_tmp.csv"), "w+") as f:
+            f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ApproxOffers\n")
                 
             for i, item in enumerate(t.readlines()):
-                if i < scanned_items:
-                    continue
-
                 # Restart Tibia every 13 minutes to avoid afk kick.
                 if time.time() - afk_time > 800:
                     client.close_market()
@@ -139,8 +123,8 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
         
     client.exit_tibia()
 
-    #os.replace(os.path.join(results_location, "fullscan_tmp.csv"), os.path.join(results_location, "fullscan.csv"))
-    #push_to_github(results_location)
+    os.replace(os.path.join(results_location, "fullscan_tmp.csv"), os.path.join(results_location, "fullscan.csv"))
+    push_to_github(results_location)
 
     turn_off_display()
 
