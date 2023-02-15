@@ -9,6 +9,8 @@ import re
 from memory_reader import MemoryReader
 import ctypes
 
+pyautogui.PAUSE = 0.02
+
 
 class EventData:
     def __init__(self, date: datetime, events: List[str]):
@@ -119,6 +121,7 @@ class MarketMemoryReader:
         self.last_expression = ""
         
         self.has_finished_filtering = False
+        
     
     def find_current_memory(self, buy_offer: int, sell_offer: int, max_buy_offer: int, max_sell_offer: int):
         """Filters the readers with the current values. If all readers only have 1 value left, returns True.
@@ -156,6 +159,9 @@ class MarketMemoryReader:
         +8 between max and min
         0x155064c8 min buy
 
+        It seems sell offers are NOT always on the same address!
+        At some point they switch to someplace else.
+        
         Base: 0x19d88868 buy offer 1 (same arithmetic for sell)
         -8 between offer and amount
         0x19d88860 amount 1
@@ -221,11 +227,17 @@ class MarketMemoryReader:
         if buy_timestamp == self.last_buy_times[0]:
             buy_offer = buy_amount = buy_timestamp = -1
         sell_offer, sell_amount, sell_timestamp = sell_offer_values[:3]
+        if sell_offer <= 0 or sell_offer > 4000000000:
+            # Probably the address changed.
+            self.sell_offer_reader.reset_filter()
+            self.buy_offer_reader.reset_filter()
+            self.sell_details_reader.reset_filter()
+            self.buy_details_reader.reset_filter()
+            self.has_finished_filtering = False
+            return None
         if sell_timestamp == self.last_sell_times[0]:
             sell_offer = sell_amount = sell_timestamp = -1
-        
-        self.last_expression = f"{max_bought},{min_bought},{total_bought_gold},{amount_bought},{average_bought}" +\
-                               f"{max_sold},{min_sold},{total_sold_gold},{amount_sold},{average_sold}"
+            
         now_timestamp = (datetime.now() + timedelta(30)).timestamp()
         offers_within_24h = 0
         
@@ -242,6 +254,7 @@ class MarketMemoryReader:
                 if (now_timestamp - sell_timestamp) < 86400:
                     offers_within_24h += 1
 
+        print(sell_offer, buy_offer)
         return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, offers_within_24h)
 
 class Client:
@@ -276,19 +289,13 @@ class Client:
         """
         Logs into the provided account, and selects the provided character.
         """
-        
+        pyautogui.PAUSE = 0.1
         password_position = self._wait_until_find("images/PasswordField.png", click=True, cache=False)
-
-        pyautogui.leftClick(password_position)
         pyautogui.typewrite(password)
 
         print("Finding email field")
-        email_position = pyautogui.locateCenterOnScreen("images/EmailField.png")
-        if email_position:
-            pyautogui.leftClick(email_position)
-            pyautogui.typewrite(email)
-        else:
-            print("Couldn't find Email field...")
+        email_position = self._wait_until_find("images/EmailField.png", click=True, cache=False)
+        pyautogui.typewrite(email)
 
         pyautogui.press("enter")
 
@@ -299,6 +306,7 @@ class Client:
         # Wait until ingame.
         self._wait_until_find("images/Ingame.png", cache=False)
         print("Ingame.")
+        pyautogui.PAUSE=0.02
 
     def exit_tibia(self):
         """
@@ -324,7 +332,6 @@ class Client:
                 self._wait_until_find("images/Details.png", cache=False)
 
                 print("Market open.")
-                self._find_memory_addresses()
                 return True
             
             return False
@@ -348,16 +355,17 @@ class Client:
         """
         print("Finding relevant memory addresses with OCR.")
         
-        for item in ["tibia coins", "blueberry cupcake", "sudden death rune", "stealth ring", "brown mushroom", "strong mana potion"]:
-            if self.market_reader.has_finished_filtering:
-                break
-            
-            values = self.search_item(item)
-            print(len(self.market_reader.sell_offer_reader.addresses))
-            print(len(self.market_reader.buy_offer_reader.addresses))
-            print(len(self.market_reader.sell_details_reader.addresses))
-            print(len(self.market_reader.buy_details_reader.addresses))
-            print(values)
+        while not self.market_reader.has_finished_filtering:
+            for item in ["tibia coins", "blueberry cupcake", "sudden death rune", "stealth ring", "brown mushroom", "strong mana potion"]:
+                if self.market_reader.has_finished_filtering:
+                    break
+                
+                values = self.search_item(item)
+                print(len(self.market_reader.sell_offer_reader.addresses))
+                print(len(self.market_reader.buy_offer_reader.addresses))
+                print(len(self.market_reader.sell_details_reader.addresses))
+                print(len(self.market_reader.buy_details_reader.addresses))
+                print(values)
             
         # Fill memory with timestamps to know if an offer in memory still belongs to the current item.
         self.search_item("tibia coins")
@@ -372,7 +380,7 @@ class Client:
             pyautogui.press("down")
             
             # Give Tibia some time to load new values.
-            time.sleep(0.2)
+            time.sleep(0.3)
                 
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:
@@ -406,7 +414,16 @@ class Client:
                 return buy_offer, sell_offer, max([sellers, buyers])
 
             if self.market_reader.has_finished_filtering:
-                return self.market_reader.get_current_market_values(name) 
+                values = self.market_reader.get_current_market_values(name)
+                if not values:
+                    self.close_market()
+                    self.wiggle()
+                    self.open_market(False)
+                    self._find_memory_addresses()
+                    return self.search_item(name)
+                else:
+                    return values
+            
             elif self.market_tab == "offers":
                 buy_offer, sell_offer, approx_offers = scan_offers()
                 self._wait_until_find("images/Details.png", click=True)
