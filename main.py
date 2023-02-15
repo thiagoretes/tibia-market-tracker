@@ -14,7 +14,6 @@ def write_marketable_items():
         for item in items:
             f.write(item + "\n")
 
-
 def write_events(results_location: str):
     """
     Writes all currently known events into the events.csv in the results_location.
@@ -140,8 +139,8 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
         
     client.exit_tibia()
 
-    os.replace(os.path.join(results_location, "fullscan_tmp.csv"), os.path.join(results_location, "fullscan.csv"))
-    push_to_github(results_location)
+    #os.replace(os.path.join(results_location, "fullscan_tmp.csv"), os.path.join(results_location, "fullscan.csv"))
+    #push_to_github(results_location)
 
     turn_off_display()
 
@@ -172,10 +171,10 @@ if __name__ == "__main__":
     
     #schedule.every().day.at("10:15:00").do(lambda: observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     #observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
-    #do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
+    do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
 
-    schedule.every().day.at("18:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
-    schedule.every().day.at("06:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
+    schedule.every().day.at("20:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
+    schedule.every().day.at("08:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     
     while True:
         schedule.run_pending()

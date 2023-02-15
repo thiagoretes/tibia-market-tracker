@@ -6,3 +6,5 @@ pandas
 gitpython
 schedule
 gitpython
+requests
+mem-edit

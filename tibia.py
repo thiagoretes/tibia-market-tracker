@@ -6,6 +6,7 @@ import screenshot
 import requests
 from datetime import datetime, timedelta
 import re
+from memory_reader import MemoryReader
 
 
 class EventData:
@@ -103,6 +104,146 @@ class Wiki:
         
         return event_data
 
+
+class MarketMemoryReader:
+    def __init__(self):
+        # Memory addresses are predictable, but the base needs to be found first.
+
+        # Base: 0x155064b0 buy transactions (same arithmetic for sell)
+        # +8 between transaction and total
+        # 0x155064b8 total money this month (divide by transactions for average)
+        # +8 between total and max
+        # 0x155064c0 max buy
+        # +8 between max and min
+        # 0x155064c8 min buy
+        self.buy_details_reader: MemoryReader = MemoryReader(p_name="client")
+        self.sell_details_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
+
+        # Base: 0x19d88868 buy offer 1 (same arithmetic for sell)
+        # -8 between offer and amount
+        # 0x19d88860 amount 1
+        # -24 between offer and unix timestamp
+        # 0x19d88850 unix timestamp 1
+        # +48 between offer 1 and 2
+        # 0x19d88898 buy offer 2
+        self.buy_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
+        self.sell_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
+        
+        self.last_sell_times = [0 for i in range(16)]
+        self.last_buy_times = [0 for i in range(16)]
+        self.has_finished_filtering = False
+    
+    def find_current_memory(self, buy_offer: int, sell_offer: int, max_buy_offer: int, max_sell_offer: int):
+        """Filters the readers with the current values. If all readers only have 1 value left, returns True.
+
+        Args:
+            buy_offer (int): The current 1st buy offer.
+            sell_offer (int): The current 1st sell offer.
+            avg_buy_offer (int): The current maximum buy offer.
+            avg_sell_offer (int): The current maximum sell offer.
+        """
+        if len(self.buy_offer_reader.addresses) != 1:
+            self.buy_offer_reader.filter_value(buy_offer)
+        if len(self.sell_offer_reader.addresses) != 1:
+            self.sell_offer_reader.filter_value(sell_offer)
+        if len(self.buy_details_reader.addresses) != 1:
+            self.buy_details_reader.filter_value(max_buy_offer)
+        if len(self.sell_details_reader.addresses) != 1:
+            self.sell_details_reader.filter_value(max_sell_offer)
+
+        if len(self.buy_offer_reader.addresses) == 1 and len(self.sell_offer_reader.addresses) == 1 and\
+            len(self.buy_details_reader.addresses) == 1 and len(self.sell_details_reader.addresses) == 1:
+            self._calculate_memory_locations()
+            self.has_finished_filtering = True
+
+    def _calculate_memory_locations(self):
+        """Calculates the rest of the memory locations which depend on the already found ones.
+        
+        Memory addresses are predictable, but the bases need to be found first. Example:
+
+        Base: 0x155064b0 buy transactions (same arithmetic for sell)
+        +8 between transaction and total
+        0x155064b8 total money this month (divide by transactions for average)
+        +8 between total and max
+        0x155064c0 max buy
+        +8 between max and min
+        0x155064c8 min buy
+
+        Base: 0x19d88868 buy offer 1 (same arithmetic for sell)
+        -8 between offer and amount
+        0x19d88860 amount 1
+        -24 between offer and unix timestamp
+        0x19d88850 unix timestamp 1
+        +48 between offer 1 and 2
+        0x19d88898 buy offer 2
+        """
+        buy_offer_base = self.buy_offer_reader.addresses[0]
+        self.buy_offer_reader.addresses.append(buy_offer_base - 8) # Amount bought.
+        self.buy_offer_reader.addresses.append(buy_offer_base - 24) # Timestamp.
+        
+        sell_offer_base = self.sell_offer_reader.addresses[0]
+        self.sell_offer_reader.addresses.append(sell_offer_base - 8) # Amount sold.
+        self.sell_offer_reader.addresses.append(sell_offer_base - 24) # Timestamp.
+        
+        # Add more than 1st offers to memory reader.
+        for i in range(0, 16):
+            ith_buy_offer = [x + 48 * i for x in self.buy_offer_reader.addresses[:3]]
+            ith_sell_offer = [x + 48 * i for x in self.sell_offer_reader.addresses[:3]]
+            self.buy_offer_reader.addresses.extend(ith_buy_offer)
+            self.sell_offer_reader.addresses.extend(ith_sell_offer)
+            
+        buy_details_base = self.buy_details_reader.addresses[0] # Max buy offer.
+        self.buy_details_reader.addresses.append(buy_details_base + 8) # Min buy offer.
+        self.buy_details_reader.addresses.append(buy_details_base - 8) # Total money.
+        self.buy_details_reader.addresses.append(buy_details_base - 16) # Total bought.
+        
+        sell_details_base = self.sell_details_reader.addresses[0] # Max sell offer.
+        self.sell_details_reader.addresses.append(sell_details_base + 8) # Min sell offer.
+        self.sell_details_reader.addresses.append(sell_details_base - 8) # Total money.
+        self.sell_details_reader.addresses.append(sell_details_base - 16) # Total sold.
+        
+    def get_current_market_values(self, name: str) -> MarketValues:
+        """Reads the current market data from memory and creates a MarketValues object with it.
+
+        Args:
+            name (str): The name of the current item. Used to fill MarketValues name.
+
+        Returns:
+            MarketValues: The MarketValues for the current item.
+        """
+        max_bought, min_bought, total_bought_gold, amount_bought = self.buy_details_reader.read_values()
+        average_bought = total_bought_gold // amount_bought
+        max_sold, min_sold, total_sold_gold, amount_sold = self.sell_details_reader.read_values()
+        average_sold = total_sold_gold // amount_sold
+        
+        buy_offer_values = self.buy_offer_reader.read_values()
+        sell_offer_values = self.sell_offer_reader.read_values()
+        
+        buy_offer, buy_amount, buy_timestamp = buy_offer_values[:3]
+        if buy_timestamp == self.last_buy_times[0]:
+            buy_offer = buy_amount = buy_timestamp = -1
+        sell_offer, sell_amount, sell_timestamp = sell_offer_values[:3]
+        if sell_timestamp == self.last_sell_times[0]:
+            sell_offer = sell_amount = sell_timestamp = -1
+        
+        now_timestamp = (datetime.now() + timedelta(30)).timestamp()
+        offers_within_24h = 0
+        
+        for i in range(16):
+            buy_offer, buy_amount, buy_timestamp = buy_offer_values[i * 3 : (i + 1) * 3]
+            sell_offer, sell_amount, sell_timestamp = sell_offer_values[i * 3 : (i + 1) * 3]
+            
+            if buy_timestamp != self.last_buy_times[i]:
+                self.last_buy_times[i] = buy_timestamp
+                if (now_timestamp - buy_timestamp) < 86400:
+                    offers_within_24h += 1
+            if sell_timestamp != self.last_sell_times[i]:
+                self.last_sell_times[i] = sell_timestamp
+                if (now_timestamp - sell_timestamp) < 86400:
+                    offers_within_24h += 1
+
+        return (MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, -1), offers_within_24h)
+
 class Client:
     def __init__(self):
         '''
@@ -112,9 +253,11 @@ class Client:
         self.tibia: subprocess.Popen = None
         self.position_cache = {}
         self.market_tab = "offers"
+        self.market_reader: MarketMemoryReader = None
+
 
     def start_game(self, location:str):
-        self.tibia: subprocess.Popen = subprocess.Popen([location])
+        self.tibia: subprocess.Popen = subprocess.Popen([location], user="may")
         time.sleep(5)
 
         self._update_tibia()
@@ -133,6 +276,7 @@ class Client:
         """
         Logs into the provided account, and selects the provided character.
         """
+        
         password_position = self._wait_until_find("images/PasswordField.png", click=True, cache=False)
 
         pyautogui.leftClick(password_position)
@@ -155,6 +299,9 @@ class Client:
         # Wait until ingame.
         self._wait_until_find("images/Ingame.png", cache=False)
         print("Ingame.")
+        
+        # Starting reader before login gets detected as debugger.
+        self.market_reader = MarketMemoryReader()
 
     def exit_tibia(self):
         """
@@ -177,6 +324,7 @@ class Client:
                 self._wait_until_find("images/Details.png", cache=False)
 
                 print("Market open.")
+                self._find_memory_addresses()
                 return True
             
             return False
@@ -194,6 +342,17 @@ class Client:
 
         print("Opening market failed!")
         exit(1)
+        
+    def _find_memory_addresses(self):
+        """Walks through a few highly sold items to find necessary memory addresses.
+        """
+        print("Finding relevant memory addresses with OCR.")
+        
+        for item in ["tibia coins", "blueberry cupcake", "sudden death rune", "stealth ring", "brown mushroom", "strong mana potion"]:
+            if self.market_reader.has_finished_filtering:
+                break
+            
+            values = self.search_item(item)
 
     def search_item(self, name: str) -> MarketValues:
         """
@@ -204,13 +363,13 @@ class Client:
             pyautogui.typewrite(name)
             pyautogui.press("down")
             time.sleep(0.2)
-
+                
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:
                     self.position_cache["images/Statistics.png"] = pyautogui.locateOnScreen("images/Statistics.png")
 
                 statistics = self.position_cache["images/Statistics.png"]
-                interpreted_statistics = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(statistics.left, statistics.top, 300, 140)))\
+                interpreted_statistics = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(statistics.left, statistics.top, 300, 140), rescale_factor=3))\
                     .replace(",", "").replace(".", "").replace(" ", "").replace("k", "000").splitlines()
                 interpreted_statistics = [stat for stat in interpreted_statistics if len(stat) > 0]
 
@@ -223,9 +382,9 @@ class Client:
                 sell_offers = offers[0]
                 buy_offers = offers[1]
 
-                interpreted_buy_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(buy_offers.left, buy_offers.top + buy_offers.height + 3, buy_offers.width, buy_offers.height + 3)))\
+                interpreted_buy_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(buy_offers.left, buy_offers.top + buy_offers.height, buy_offers.width, buy_offers.height), rescale_factor=3))\
                     .replace(",", "").replace(".", "").replace(" ", "").replace("k", "000").split("\n")[0]
-                interpreted_sell_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(sell_offers.left, sell_offers.top + sell_offers.height + 3, sell_offers.width, sell_offers.height + 3)))\
+                interpreted_sell_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(sell_offers.left, sell_offers.top + sell_offers.height, sell_offers.width, sell_offers.height), rescale_factor=3))\
                     .replace(",", "").replace(".", "").replace(" ", "").replace("k", "000").split("\n")[0]
 
                 sell_offer = int(interpreted_sell_offer) if interpreted_sell_offer.isnumeric() else -1
@@ -236,7 +395,9 @@ class Client:
 
                 return buy_offer, sell_offer, max([sellers, buyers])
 
-            if self.market_tab == "offers":
+            if self.market_reader.has_finished_filtering:
+                return self.market_reader.get_current_market_values(name) 
+            elif self.market_tab == "offers":
                 buy_offer, sell_offer, approx_offers = scan_offers()
                 self._wait_until_find("images/Details.png", click=True)
                 interpreted_statistics = scan_details()
@@ -248,7 +409,8 @@ class Client:
                 self.market_tab = "offers"
 
             values = MarketValues(name, time.time(), sell_offer, buy_offer, int(interpreted_statistics[6]), int(interpreted_statistics[2]), int(interpreted_statistics[4]), int(interpreted_statistics[0]), int(interpreted_statistics[5]), int(interpreted_statistics[3]), approx_offers)
-
+            self.market_reader.find_current_memory(buy_offer, sell_offer, int(interpreted_statistics[1]), int(interpreted_statistics[5]))
+            
             return values
         except pyautogui.FailSafeException as e:
             exit(1)
