@@ -7,6 +7,7 @@ import requests
 from datetime import datetime, timedelta
 import re
 from memory_reader import MemoryReader
+import ctypes
 
 
 class EventData:
@@ -107,25 +108,8 @@ class Wiki:
 
 class MarketMemoryReader:
     def __init__(self):
-        # Memory addresses are predictable, but the base needs to be found first.
-
-        # Base: 0x155064b0 buy transactions (same arithmetic for sell)
-        # +8 between transaction and total
-        # 0x155064b8 total money this month (divide by transactions for average)
-        # +8 between total and max
-        # 0x155064c0 max buy
-        # +8 between max and min
-        # 0x155064c8 min buy
         self.buy_details_reader: MemoryReader = MemoryReader(p_name="client")
         self.sell_details_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
-
-        # Base: 0x19d88868 buy offer 1 (same arithmetic for sell)
-        # -8 between offer and amount
-        # 0x19d88860 amount 1
-        # -24 between offer and unix timestamp
-        # 0x19d88850 unix timestamp 1
-        # +48 between offer 1 and 2
-        # 0x19d88898 buy offer 2
         self.buy_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         self.sell_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         
@@ -146,13 +130,13 @@ class MarketMemoryReader:
             avg_sell_offer (int): The current maximum sell offer.
         """
         if len(self.buy_offer_reader.addresses) != 1:
-            self.buy_offer_reader.filter_value(buy_offer)
+            self.buy_offer_reader.filter_value(0, ctypes.c_long(buy_offer))
         if len(self.sell_offer_reader.addresses) != 1:
-            self.sell_offer_reader.filter_value(sell_offer)
+            self.sell_offer_reader.filter_value(0, ctypes.c_long(sell_offer))
         if len(self.buy_details_reader.addresses) != 1:
-            self.buy_details_reader.filter_value(max_buy_offer)
+            self.buy_details_reader.filter_value(0, ctypes.c_long(max_buy_offer))
         if len(self.sell_details_reader.addresses) != 1:
-            self.sell_details_reader.filter_value(max_sell_offer)
+            self.sell_details_reader.filter_value(0, ctypes.c_long(max_sell_offer))
 
         if len(self.buy_offer_reader.addresses) == 1 and len(self.sell_offer_reader.addresses) == 1 and\
             len(self.buy_details_reader.addresses) == 1 and len(self.sell_details_reader.addresses) == 1:
