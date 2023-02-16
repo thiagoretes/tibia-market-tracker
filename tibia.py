@@ -179,7 +179,7 @@ class MarketMemoryReader:
         self.sell_offer_reader.addresses.append(sell_offer_base - 24) # Timestamp.
         
         # Add more than 1st offers to memory reader.
-        for i in range(0, 8):
+        for i in range(1, 8):
             ith_buy_offer = [x + 48 * i for x in self.buy_offer_reader.addresses[:3]]
             ith_sell_offer = [x + 48 * i for x in self.sell_offer_reader.addresses[:3]]
             self.buy_offer_reader.addresses.extend(ith_buy_offer)
@@ -216,7 +216,7 @@ class MarketMemoryReader:
         
         # Check if this memory is a duplicate of the last item. If so, probably nonexistent item.
         if current_expression == self.last_expression:
-            raise Exception("This item probably doesn't exist.")
+            raise Exception("The current memory is a duplicate of the previous item.")
         else:
             self.last_expression = current_expression
         
@@ -247,14 +247,13 @@ class MarketMemoryReader:
             
             if buy_timestamp != self.last_buy_times[i]:
                 self.last_buy_times[i] = buy_timestamp
-                if (now_timestamp - buy_timestamp) < 86400:
+                if now_timestamp > buy_timestamp and (now_timestamp - buy_timestamp) < 86400:
                     offers_within_24h += 1
             if sell_timestamp != self.last_sell_times[i]:
                 self.last_sell_times[i] = sell_timestamp
-                if (now_timestamp - sell_timestamp) < 86400:
+                if now_timestamp > sell_timestamp and (now_timestamp - sell_timestamp) < 86400:
                     offers_within_24h += 1
 
-        print(sell_offer, buy_offer)
         return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, offers_within_24h)
 
 class Client:
@@ -353,10 +352,11 @@ class Client:
     def _find_memory_addresses(self):
         """Walks through a few highly sold items to find necessary memory addresses.
         """
+        pyautogui.PAUSE = 0.1
         print("Finding relevant memory addresses with OCR.")
         
         while not self.market_reader.has_finished_filtering:
-            for item in ["tibia coins", "blueberry cupcake", "sudden death rune", "stealth ring", "brown mushroom", "strong mana potion"]:
+            for item in ["tibia coins", "sudden death rune", "stealth ring", "brown mushroom", "strong mana potion"]:
                 if self.market_reader.has_finished_filtering:
                     break
                 
@@ -366,7 +366,8 @@ class Client:
                 print(len(self.market_reader.sell_details_reader.addresses))
                 print(len(self.market_reader.buy_details_reader.addresses))
                 print(values)
-            
+
+        pyautogui.PAUSE = 0.01
         # Fill memory with timestamps to know if an offer in memory still belongs to the current item.
         self.search_item("tibia coins")
 
@@ -380,7 +381,7 @@ class Client:
             pyautogui.press("down")
             
             # Give Tibia some time to load new values.
-            time.sleep(0.3)
+            time.sleep(0.45)
                 
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:
@@ -420,9 +421,9 @@ class Client:
                     self.wiggle()
                     self.open_market(False)
                     self._find_memory_addresses()
-                    return self.search_item(name)
-                else:
-                    return values
+                    values = self.search_item(name)
+
+                return values
             
             elif self.market_tab == "offers":
                 buy_offer, sell_offer, approx_offers = scan_offers()
