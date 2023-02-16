@@ -239,7 +239,7 @@ class MarketMemoryReader:
             sell_offer = sell_amount = sell_timestamp = -1
             
         now_timestamp = (datetime.now() + timedelta(30)).timestamp()
-        offers_within_24h = 0
+        offers_within_24h = [0, 0]
         
         for i in range(8):
             b_, b__, buy_timestamp = buy_offer_values[i * 3 : (i + 1) * 3]
@@ -248,13 +248,13 @@ class MarketMemoryReader:
             if buy_timestamp != self.last_buy_times[i]:
                 self.last_buy_times[i] = buy_timestamp
                 if now_timestamp > buy_timestamp and (now_timestamp - buy_timestamp) < 86400:
-                    offers_within_24h += 1
+                    offers_within_24h[0] += 1
             if sell_timestamp != self.last_sell_times[i]:
                 self.last_sell_times[i] = sell_timestamp
                 if now_timestamp > sell_timestamp and (now_timestamp - sell_timestamp) < 86400:
-                    offers_within_24h += 1
+                    offers_within_24h[1] += 1
 
-        return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, offers_within_24h)
+        return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, max(offers_within_24h))
 
 class Client:
     def __init__(self):
@@ -409,8 +409,8 @@ class Client:
                 sell_offer = int(interpreted_sell_offer) if interpreted_sell_offer.isnumeric() else -1
                 buy_offer = int(interpreted_buy_offer) if interpreted_buy_offer.isnumeric() else -1
                 
-                sellers = self.get_traders_per_day() if sell_offer > 0 else 0
-                buyers = self.get_traders_per_day(False) if buy_offer > 0 else 0
+                sellers = 0
+                buyers = 0
 
                 return buy_offer, sell_offer, max([sellers, buyers])
 
@@ -445,45 +445,6 @@ class Client:
         except Exception as e:
             print(f"Market search failed for {name}: {e}")
             return MarketValues(name, time.time(), -1, -1, -1, -1, -1, -1, -1, -1, -1)
-
-    def get_traders_per_day(self, sell_offers: bool = True) -> int:
-        """
-        Reads the "Ends At" column of the market window and approximates the amount of traders per day.
-        """
-        if "images/EndsAt.png" not in self.position_cache:
-            self.position_cache["images/EndsAt.png"] = list(pyautogui.locateAllOnScreen("images/EndsAt.png"))
-
-        statistics = self.position_cache["images/EndsAt.png"][0 if sell_offers else 1]
-        interpreted_dates = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(statistics.left, statistics.top + statistics.height + 3, statistics.width, statistics.height * 8), rescale_factor=4), char_white_list="0123456789-,:")\
-            .replace(" ", "").splitlines()
-        
-        now = datetime.now() + timedelta(30)
-        dates = []
-        for line in interpreted_dates:
-            if len(line) == 19:
-                try:
-                    dates.append(datetime.strptime(line, "%Y-%m-%d,%H:%M:%S"))
-                except Exception as e:
-                    print(f"Failed date parsing, skipping value: {e}")
-        
-        # Only take offers of the past day.
-        dates = [date for date in dates if (now - date).days < 1]
-
-        if not dates:
-            return 0
-
-        approx_offers = len(dates)
-
-        if len(dates) >= 6:
-            # We would have to scroll to get all of todays offers.
-            # Approximate instead.
-            lowest_date = min(dates)
-
-            # Linearly extrapolate trade offers per day.
-            hours_between = (now - lowest_date).total_seconds() / 3600
-            approx_offers = (24 / hours_between) * len(dates)
-
-        return int(approx_offers)
 
     def close_market(self):
         """
