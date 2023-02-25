@@ -79,7 +79,7 @@ def observe_items(email: str, password: str, tibia_location: str, results_locati
                 
         client.close_market()
         client.wiggle()
-        client.open_market(False)
+        client.open_market()
         
         time.sleep(2 * 60)
 
@@ -100,23 +100,63 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
     client.login_to_game(email, password)
 
     afk_time = time.time()
-    client.open_market()
+    fail_counter = 0
+    retry_counter = 0
+    
+    if not client.open_market():
+        client.exit_tibia()
+        return
+    
     client._find_memory_addresses()
 
     with open("tracked_items.txt", "r") as t:
         with open(os.path.join(results_location, "fullscan_tmp.csv"), "w+") as f:
             f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ApproxOffers\n")
+            
+            lines = t.readlines()
+            i = 0
+            while i < len(lines):
+                item = lines[i]
                 
-            for i, item in enumerate(t.readlines()):
                 # Restart Tibia every 13 minutes to avoid afk kick.
                 if time.time() - afk_time > 800:
                     client.close_market()
                     client.wiggle()
                     afk_time = time.time()
-                    client.open_market(False)
+                    client.open_market()
 
                 values = client.search_item(item.replace("\n", ""))
                 print(f"{i}. {values}")
+                
+                i += 1
+
+                # Item search failed.
+                if values.approx_offers == -1:
+                    fail_counter += 1
+                    
+                    # If it failed 11 times in a row, reopen market and go back.
+                    # Probably a disconnect.
+                    if fail_counter == 11:
+                        retry_counter += 1
+                        if retry_counter >= 10:
+                            print("Something is wrong. Aborting run.")
+                            client.exit_tibia()
+                            return
+                        
+                        print("Failed 11 times in a row. Waiting and retrying...")
+                        fail_counter = 0
+                        
+                        client.close_market()
+                        time.sleep(10)
+                        client.wiggle()
+                        afk_time = time.time()
+                        client.open_market()
+                        
+                        i -= 11
+                    continue
+                
+                fail_counter = 0
+                retry_counter = 0
                 f.write(str(values) + "\n")
 
                 with open(os.path.join(results_location, "histories", f"{values.name.lower()}.csv"), "a+") as h:

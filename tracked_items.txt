@@ -992,16 +992,6 @@ Fireproof Horn
 Firesoul Tabard
 Fireworks Capsule
 Fireworks Rocket
-Fireworks in Shape of '0'
-Fireworks in Shape of '1'
-Fireworks in Shape of '2'
-Fireworks in Shape of '3'
-Fireworks in Shape of '4'
-Fireworks in Shape of '5'
-Fireworks in Shape of '6'
-Fireworks in Shape of '7'
-Fireworks in Shape of '8'
-Fireworks in Shape of '9'
 Firlefanz
 Fish
 Fish Fin
@@ -1592,11 +1582,6 @@ Lion Trophy
 Lion Wand
 Lion's Mane
 Lisa's Doll
-Lit Crystal Lamp
-Lit Glowing Mushroom
-Lit Moon Mirror
-Lit Rainbow Torch
-Lit Small Lamp
 Little Bowl of Myrrh
 Living Armor
 Living Vine Bow

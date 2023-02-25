@@ -9,8 +9,6 @@ import re
 from memory_reader import MemoryReader
 import ctypes
 
-pyautogui.PAUSE = 0.02
-
 
 class EventData:
     def __init__(self, date: datetime, events: List[str]):
@@ -23,14 +21,19 @@ class EventData:
 
 class MarketValues:
     def __init__(self, name: str, time: float, sell_offer: int, buy_offer: int, month_sell_offer: int, month_buy_offer: int, sold: int, bought: int, highest_sell: int, lowest_buy: int, approx_offers: int):
-        self.buy_offer: int = max(buy_offer, lowest_buy)
-        self.sell_offer: int = max(min(sell_offer, highest_sell), self.buy_offer) if sold > 0 else sell_offer
+        self.buy_offer: int = buy_offer
+        self.sell_offer: int = max(sell_offer, self.buy_offer)
+        
+        # A few safeguard assumptions about potential profit to not fall for market manipulation.
+        profit_buy_offer: int = max(buy_offer, lowest_buy) if bought > 0 else buy_offer
+        profit_sell_offer: int = max(min(sell_offer, highest_sell) if sold > 0 else sell_offer, profit_buy_offer)
+        
         self.month_sell_offer: int = month_sell_offer
         self.month_buy_offer: int = month_buy_offer
         self.sold: int = sold
         self.bought: int = bought
-        self.profit: int = self.sell_offer - self.buy_offer
-        self.rel_profit: float = round(self.profit / self.buy_offer, 2) if self.buy_offer > 0 else 0
+        self.profit: int = profit_sell_offer - profit_buy_offer
+        self.rel_profit: float = round(self.profit / profit_buy_offer, 2) if profit_buy_offer > 0 else 0
         self.potential_profit: int = self.profit * min(sold, bought)
         self.approx_offers: int = approx_offers
         self.name = name
@@ -262,6 +265,7 @@ class Client:
         Starts Tibia, updates it if necessary.
         '''
         # Start Tibia.
+        pyautogui.PAUSE = 0.1
         self.tibia: subprocess.Popen = None
         self.position_cache = {}
         self.market_tab = "offers"
@@ -288,7 +292,6 @@ class Client:
         """
         Logs into the provided account, and selects the provided character.
         """
-        pyautogui.PAUSE = 0.1
         password_position = self._wait_until_find("images/PasswordField.png", click=True, cache=False)
         pyautogui.typewrite(password)
 
@@ -305,7 +308,6 @@ class Client:
         # Wait until ingame.
         self._wait_until_find("images/Ingame.png", cache=False)
         print("Ingame.")
-        pyautogui.PAUSE=0.02
 
     def exit_tibia(self):
         """
@@ -314,20 +316,23 @@ class Client:
         pyautogui.hotkey("alt", "f4")
         self._wait_until_find("images/Exit.png", click=True, cache=False)
 
-    def open_market(self, open_depot=True):
+    def open_market(self):
         """
         Searches for an empty depot, and opens the market on it.
         """
+        print("Opening market")
+
         if not self.market_reader:
             self.market_reader = MarketMemoryReader()
             
         def try_open_market() -> bool:
             x, y = self._wait_until_find("images/SuccessDepotTile.png", timeout=5, cache=False)
             if x >= 0:
-                if open_depot:
+                if self._wait_until_find("images/Market.png", click=True, cache=False, timeout=5)[0] == -1:
+                    print("Opening depot")
                     pyautogui.leftClick(636, 375)
-
-                self._wait_until_find("images/Market.png", click=True, cache=False)
+                    self._wait_until_find("images/Market.png", click=True, cache=False, timeout=5)[0]
+                    
                 self._wait_until_find("images/Details.png", cache=False)
 
                 print("Market open.")
@@ -336,18 +341,17 @@ class Client:
             return False
 
         if pyautogui.locateCenterOnScreen("images/SuccessDepotTile.png") and try_open_market():
-            return
+            return True
 
-        open_depot = True
         for i in range(len(list(pyautogui.locateAllOnScreen("images/DepotTile.png")))):
             print(f"Trying depot {i}...")
             depot_position = list(pyautogui.locateAllOnScreen("images/DepotTile.png"))[i]
             pyautogui.leftClick(depot_position)
             if try_open_market():
-                return
+                return True
 
         print("Opening market failed!")
-        exit(1)
+        return False
         
     def _find_memory_addresses(self):
         """Walks through a few highly sold items to find necessary memory addresses.
@@ -367,7 +371,6 @@ class Client:
                 print(len(self.market_reader.buy_details_reader.addresses))
                 print(values)
 
-        pyautogui.PAUSE = 0.01
         # Fill memory with timestamps to know if an offer in memory still belongs to the current item.
         self.search_item("tibia coins")
 
@@ -415,11 +418,12 @@ class Client:
                 return buy_offer, sell_offer, max([sellers, buyers])
 
             if self.market_reader.has_finished_filtering:
+                pyautogui.PAUSE = 0.01
                 values = self.market_reader.get_current_market_values(name)
                 if not values:
                     self.close_market()
                     self.wiggle()
-                    self.open_market(False)
+                    self.open_market()
                     self._find_memory_addresses()
                     values = self.search_item(name)
 
@@ -451,6 +455,8 @@ class Client:
         Closes the market window using the escape hotkey.
         Also clears the cache to avoid clicking before the market opens.
         """
+        print("Closing market...")
+        pyautogui.PAUSE = 0.1
         pyautogui.press("escape")
         time.sleep(0.1)
         pyautogui.press("escape")
@@ -468,17 +474,19 @@ class Client:
         """
         Wiggles the character to avoid being afk kicked.
         """
+        print("Wiggling character...")
         pyautogui.hotkey("ctrl", "right")
         time.sleep(0.5)
         pyautogui.hotkey("ctrl", "left")
         time.sleep(0.5)
         self.market_tab = "offers"
 
-    def _wait_until_find(self, image: str, timeout: int = 1000, click: bool = False, cache: bool = True) -> Tuple[int, int]:
+    def _wait_until_find(self, image: str, timeout: int = 5, click: bool = False, cache: bool = True) -> Tuple[int, int]:
         start_time = time.time()
 
         while time.time() - start_time < timeout:
             if cache and image in self.position_cache:
+                print(f"Found {image} in cache.")
                 position = self.position_cache[image]
             else:
                 print(f"Looking for {image}...")
