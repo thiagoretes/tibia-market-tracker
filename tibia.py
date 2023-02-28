@@ -21,19 +21,14 @@ class EventData:
 
 class MarketValues:
     def __init__(self, name: str, time: float, sell_offer: int, buy_offer: int, month_sell_offer: int, month_buy_offer: int, sold: int, bought: int, highest_sell: int, lowest_buy: int, approx_offers: int):
-        self.buy_offer: int = buy_offer
-        self.sell_offer: int = max(sell_offer, self.buy_offer)
-        
-        # A few safeguard assumptions about potential profit to not fall for market manipulation.
-        profit_buy_offer: int = max(buy_offer, lowest_buy) if bought > 0 else buy_offer
-        profit_sell_offer: int = max(min(sell_offer, highest_sell) if sold > 0 else sell_offer, profit_buy_offer)
-        
+        self.buy_offer: int = max(buy_offer, lowest_buy)
+        self.sell_offer: int = max(min(sell_offer, highest_sell), self.buy_offer) if sold > 0 else sell_offer
         self.month_sell_offer: int = month_sell_offer
         self.month_buy_offer: int = month_buy_offer
         self.sold: int = sold
         self.bought: int = bought
-        self.profit: int = profit_sell_offer - profit_buy_offer
-        self.rel_profit: float = round(self.profit / profit_buy_offer, 2) if profit_buy_offer > 0 else 0
+        self.profit: int = self.sell_offer - self.buy_offer
+        self.rel_profit: float = round(self.profit / self.buy_offer, 2) if self.buy_offer > 0 else 0
         self.potential_profit: int = self.profit * min(sold, bought)
         self.approx_offers: int = approx_offers
         self.name = name
@@ -226,22 +221,30 @@ class MarketMemoryReader:
         buy_offer_values = self.buy_offer_reader.read_values()
         sell_offer_values = self.sell_offer_reader.read_values()
         
+        now_timestamp = (datetime.now() + timedelta(30)).timestamp()
+        current_timestamp = datetime.now().timestamp()
+        
         buy_offer, buy_amount, buy_timestamp = buy_offer_values[:3]
-        if buy_timestamp == self.last_buy_times[0]:
-            buy_offer = buy_amount = buy_timestamp = -1
         sell_offer, sell_amount, sell_timestamp = sell_offer_values[:3]
-        if sell_offer <= 0 or sell_offer > 4000000000:
+        
+        if sell_offer <= 0 or sell_offer > 4000000000 or \
+            buy_offer <= 0 or buy_offer > 4000000000:
+            #buy_timestamp > now_timestamp or sell_timestamp > now_timestamp or \
+            #buy_timestamp < current_timestamp or sell_timestamp < current_timestamp:
             # Probably the address changed.
+            print(f"It is possible the memory address has changed: {buy_offer},{sell_offer},{buy_timestamp},{sell_timestamp}")
             self.sell_offer_reader.reset_filter()
             self.buy_offer_reader.reset_filter()
             self.sell_details_reader.reset_filter()
             self.buy_details_reader.reset_filter()
             self.has_finished_filtering = False
             return None
+        
+        if buy_timestamp == self.last_buy_times[0]:
+            buy_offer = buy_amount = buy_timestamp = -1
         if sell_timestamp == self.last_sell_times[0]:
             sell_offer = sell_amount = sell_timestamp = -1
             
-        now_timestamp = (datetime.now() + timedelta(30)).timestamp()
         offers_within_24h = [0, 0]
         
         for i in range(8):
@@ -404,9 +407,9 @@ class Client:
                 sell_offers = offers[0]
                 buy_offers = offers[1]
 
-                interpreted_buy_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(buy_offers.left, buy_offers.top + buy_offers.height, buy_offers.width, buy_offers.height), rescale_factor=3))\
+                interpreted_buy_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(buy_offers.left, buy_offers.top + buy_offers.height + 3, buy_offers.width, buy_offers.height), rescale_factor=3))\
                     .replace(",", "").replace(".", "").replace(" ", "").replace("k", "000").split("\n")[0]
-                interpreted_sell_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(sell_offers.left, sell_offers.top + sell_offers.height, sell_offers.width, sell_offers.height), rescale_factor=3))\
+                interpreted_sell_offer = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(sell_offers.left, sell_offers.top + sell_offers.height + 3, sell_offers.width, sell_offers.height), rescale_factor=3))\
                     .replace(",", "").replace(".", "").replace(" ", "").replace("k", "000").split("\n")[0]
 
                 sell_offer = int(interpreted_sell_offer) if interpreted_sell_offer.isnumeric() else -1
@@ -503,4 +506,5 @@ class Client:
 
             time.sleep(0.2)
         
+        print(f"Finding {image} failed.")
         return (-1, -1)
