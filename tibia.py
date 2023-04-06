@@ -130,13 +130,13 @@ class MarketMemoryReader:
             avg_buy_offer (int): The current maximum buy offer.
             avg_sell_offer (int): The current maximum sell offer.
         """
-        if len(self.buy_offer_reader.addresses) != 1:
+        if len(self.buy_offer_reader.addresses) != 1 and buy_offer >= 100:
             self.buy_offer_reader.filter_value(0, ctypes.c_long(buy_offer))
-        if len(self.sell_offer_reader.addresses) != 1:
+        if len(self.sell_offer_reader.addresses) != 1 and sell_offer >= 100:
             self.sell_offer_reader.filter_value(0, ctypes.c_long(sell_offer))
-        if len(self.buy_details_reader.addresses) != 1:
+        if len(self.buy_details_reader.addresses) != 1 and max_buy_offer >= 100:
             self.buy_details_reader.filter_value(0, ctypes.c_long(max_buy_offer))
-        if len(self.sell_details_reader.addresses) != 1:
+        if len(self.sell_details_reader.addresses) != 1 and max_sell_offer >= 100:
             self.sell_details_reader.filter_value(0, ctypes.c_long(max_sell_offer))
 
         if len(self.buy_offer_reader.addresses) == 1 and len(self.sell_offer_reader.addresses) == 1 and\
@@ -227,8 +227,9 @@ class MarketMemoryReader:
         buy_offer, buy_amount, buy_timestamp = buy_offer_values[:3]
         sell_offer, sell_amount, sell_timestamp = sell_offer_values[:3]
         
-        if sell_offer <= 0 or sell_offer > 4000000000 or \
-            buy_offer <= 0 or buy_offer > 4000000000:
+        if not name.lower() == "golden helmet" and\
+             sell_offer <= 0 or sell_offer > 8000000000 or \
+             buy_offer <= 0 or buy_offer > 8000000000:
             #buy_timestamp > now_timestamp or sell_timestamp > now_timestamp or \
             #buy_timestamp < current_timestamp or sell_timestamp < current_timestamp:
             # Probably the address changed.
@@ -263,7 +264,7 @@ class MarketMemoryReader:
         return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, max(offers_within_24h))
 
 class Client:
-    def __init__(self):
+    def __init__(self, possible_items: List[str]):
         '''
         Starts Tibia, updates it if necessary.
         '''
@@ -273,7 +274,19 @@ class Client:
         self.position_cache = {}
         self.market_tab = "offers"
         self.market_reader: MarketMemoryReader = None
-
+        
+        # Find out the position of all items when searching for them in the market.
+        # I.e. how often to press "down" to reach it.
+        possible_items = sorted([item.lower().strip() for item in possible_items], reverse=True)
+        self.item_position_dict: Dict[str, int] = {}
+        for i, item in enumerate(possible_items):
+            matches = 0
+            for j in range(i + 1, len(possible_items)):
+                if item in possible_items[j]:
+                    matches += 1
+            self.item_position_dict[item] = matches
+            
+        print(self.item_position_dict)
 
     def start_game(self, location:str):
         self.tibia: subprocess.Popen = subprocess.Popen([location])
@@ -363,7 +376,7 @@ class Client:
         print("Finding relevant memory addresses with OCR.")
         
         while not self.market_reader.has_finished_filtering:
-            for item in ["tibia coins", "sudden death rune", "stealth ring", "brown mushroom", "strong mana potion"]:
+            for item in ["tibia coins", "time ring", "stealth ring", "rope belt", "stone skin amulet", "collar of red plasma"]:
                 if self.market_reader.has_finished_filtering:
                     break
                 
@@ -384,11 +397,14 @@ class Client:
         try:
             pyautogui.hotkey("ctrl", "z")
             pyautogui.typewrite(name)
-            pyautogui.press("down")
             
-            # Give Tibia some time to load new values.
-            time.sleep(0.45)
-                
+            item_position = 1#self.item_position_dict[name.lower()] + 1
+            
+            for i in range(item_position):
+                pyautogui.press("down")
+                 # Give Tibia some time to load new values.
+                time.sleep(0.45)
+            
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:
                     self.position_cache["images/Statistics.png"] = pyautogui.locateOnScreen("images/Statistics.png")
@@ -484,7 +500,7 @@ class Client:
         time.sleep(0.5)
         self.market_tab = "offers"
 
-    def _wait_until_find(self, image: str, timeout: int = 5, click: bool = False, cache: bool = True) -> Tuple[int, int]:
+    def _wait_until_find(self, image: str, timeout: int = 60, click: bool = False, cache: bool = True) -> Tuple[int, int]:
         start_time = time.time()
 
         while time.time() - start_time < timeout:

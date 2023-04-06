@@ -95,28 +95,28 @@ def observe_items(email: str, password: str, tibia_location: str, results_locati
 def do_market_search(email: str, password: str, tibia_location: str, results_location: str):
     write_events(results_location)
 
-    client = Client()
-    client.start_game(tibia_location)
-    client.login_to_game(email, password)
-
-    afk_time = time.time()
-    fail_counter = 0
-    retry_counter = 0
-    
-    if not client.open_market():
-        client.exit_tibia()
-        return
-    
-    client._find_memory_addresses()
-
     with open("tracked_items.txt", "r") as t:
         with open(os.path.join(results_location, "fullscan_tmp.csv"), "w+") as f:
+            items = t.readlines()
             f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ApproxOffers\n")
             
-            lines = t.readlines()
+            client = Client(items)
+            client.start_game(tibia_location)
+            client.login_to_game(email, password)
+
+            afk_time = time.time()
+            fail_counter = 0
+            retry_counter = 0
+            
+            if not client.open_market():
+                client.exit_tibia()
+                return
+            
+            client._find_memory_addresses()
+            
             i = 0
-            while i < len(lines):
-                item = lines[i]
+            while i < len(items):
+                item = items[i]
                 
                 # Restart Tibia every 13 minutes to avoid afk kick.
                 if time.time() - afk_time > 800:
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     
     #schedule.every().day.at("10:15:00").do(lambda: observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     #observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
-    do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
+    #do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
 
     schedule.every().day.at("18:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     schedule.every().day.at("06:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
