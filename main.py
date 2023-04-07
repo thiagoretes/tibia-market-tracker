@@ -160,7 +160,7 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
                 f.write(str(values) + "\n")
 
                 with open(os.path.join(results_location, "histories", f"{values.name.lower()}.csv"), "a+") as h:
-                    h.write(str(values) + f",{time.time()}" + "\n")
+                    h.write(values.history_string() + "\n")
         
     client.exit_tibia()
 
@@ -183,10 +183,11 @@ def push_to_github(results_repo_location: str):
         print(f"Error while pushing to git: {e}")
 
 def turn_off_display():
+    """Turns off the display by using xset.
+    The display will turn on again when there is mouse or keyboard activity.
+    This is done to save power.
     """
-    Turns display off to save power. It will turn on again on pyautogui movement.
-    """
-    subprocess.Popen(["xset", "-display", ":0.0", "dpms", "force", "off"])
+    os.system("xset dpms force off")
 
 if __name__ == "__main__":
     with open("config.json", "r") as c:
@@ -196,7 +197,7 @@ if __name__ == "__main__":
     
     #schedule.every().day.at("10:15:00").do(lambda: observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     #observe_items(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
-    #do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
+    do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"])
 
     schedule.every().day.at("18:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))
     schedule.every().day.at("06:00:00").do(lambda: do_market_search(config["email"], config["password"], config["tibiaLocation"], config["resultsLocation"]))

@@ -27,7 +27,11 @@ class MarketValues:
         self.month_buy_offer: int = month_buy_offer
         self.sold: int = sold
         self.bought: int = bought
+        self.time: float = time
+
         self.profit: int = self.sell_offer - self.buy_offer
+        # Subtract 2% of the offer values, or a maximum of 250000gp, from the profit due to market fees.
+        self.profit -= min(int(self.buy_offer * 0.02), 250000) - min(int(self.sell_offer * 0.02), 250000)
         self.rel_profit: float = round(self.profit / self.buy_offer, 2) if self.buy_offer > 0 else 0
         self.potential_profit: int = self.profit * min(sold, bought)
         self.approx_offers: int = approx_offers
@@ -36,6 +40,14 @@ class MarketValues:
     def __str__(self) -> str:
         return f"{self.name.lower()},{self.sell_offer},{self.buy_offer},{self.month_sell_offer},{self.month_buy_offer},{self.sold},{self.bought},{self.profit},{self.rel_profit},{self.potential_profit},{self.approx_offers}"
 
+    def history_string(self) -> str:
+        """Returns the relevant historic values of the object as a string, separated by commas.
+        This includes the sell offer, buy offer, sold, bought and approx offers values, followed by the time of the data.
+
+        Returns:
+            str: A string containing all the values of the object, separated by commas.
+        """
+        return f"{self.sell_offer},{self.buy_offer},{self.sold},{self.bought},{self.approx_offers},{self.time}"
 
 class Wiki:
     def __init__(self):
@@ -346,7 +358,7 @@ class Client:
             if x >= 0:
                 if self._wait_until_find("images/Market.png", click=True, cache=False, timeout=5)[0] == -1:
                     print("Opening depot")
-                    pyautogui.leftClick(636, 375)
+                    pyautogui.leftClick(636, 385)
                     self._wait_until_find("images/Market.png", click=True, cache=False, timeout=5)[0]
                     
                 self._wait_until_find("images/Details.png", cache=False)
@@ -356,12 +368,12 @@ class Client:
             
             return False
 
-        if pyautogui.locateCenterOnScreen("images/SuccessDepotTile.png") and try_open_market():
+        if pyautogui.locateCenterOnScreen("images/SuccessDepotTile.png", grayscale=True, confidence=0.9) and try_open_market():
             return True
 
-        for i in range(len(list(pyautogui.locateAllOnScreen("images/DepotTile.png")))):
+        for i in range(len(list(pyautogui.locateAllOnScreen("images/DepotTile.png", grayscale=True, confidence=0.9)))):
             print(f"Trying depot {i}...")
-            depot_position = list(pyautogui.locateAllOnScreen("images/DepotTile.png"))[i]
+            depot_position = list(pyautogui.locateAllOnScreen("images/DepotTile.png", grayscale=True, confidence=0.9))[i]
             pyautogui.leftClick(depot_position)
             if try_open_market():
                 return True
@@ -407,7 +419,7 @@ class Client:
             
             def scan_details():
                 if "images/Statistics.png" not in self.position_cache:
-                    self.position_cache["images/Statistics.png"] = pyautogui.locateOnScreen("images/Statistics.png")
+                    self.position_cache["images/Statistics.png"] = pyautogui.locateOnScreen("images/Statistics.png", grayscale=True, confidence=0.9)
 
                 statistics = self.position_cache["images/Statistics.png"]
                 interpreted_statistics = screenshot.read_image_text(screenshot.process_image(screenshot.take_screenshot(statistics.left, statistics.top, 300, 140), rescale_factor=3))\
@@ -418,7 +430,7 @@ class Client:
 
             def scan_offers():
                 if "images/Offers.png" not in self.position_cache:
-                    self.position_cache["images/Offers.png"] = list(pyautogui.locateAllOnScreen("images/Offers.png"))
+                    self.position_cache["images/Offers.png"] = list(pyautogui.locateAllOnScreen("images/Offers.png", grayscale=True, confidence=0.9))
                 offers = self.position_cache["images/Offers.png"]
                 sell_offers = offers[0]
                 buy_offers = offers[1]
@@ -510,7 +522,7 @@ class Client:
             else:
                 print(f"Looking for {image}...")
                 pyautogui.moveTo(20, 20)
-                position = pyautogui.locateCenterOnScreen(image)
+                position = pyautogui.locateCenterOnScreen(image, grayscale=True, confidence=0.9)
                 if position:
                     self.position_cache[image] = position
 
@@ -524,3 +536,4 @@ class Client:
         
         print(f"Finding {image} failed.")
         return (-1, -1)
+    
