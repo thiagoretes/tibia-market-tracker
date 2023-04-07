@@ -31,7 +31,7 @@ class MarketValues:
 
         self.profit: int = self.sell_offer - self.buy_offer
         # Subtract 2% of the offer values, or a maximum of 250000gp, from the profit due to market fees.
-        self.profit -= min(int(self.buy_offer * 0.02), 250000) - min(int(self.sell_offer * 0.02), 250000)
+        self.profit -= (min(int(self.buy_offer * 0.02), 250000) + min(int(self.sell_offer * 0.02), 250000))
         self.rel_profit: float = round(self.profit / self.buy_offer, 2) if self.buy_offer > 0 else 0
         self.potential_profit: int = self.profit * min(sold, bought)
         self.approx_offers: int = approx_offers
