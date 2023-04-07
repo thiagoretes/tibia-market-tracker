@@ -88,7 +88,7 @@ class Wiki:
                 day = int(re.search(">([0-9]{1,2}) </span", event).group(1))
 
                 # Event table can wrap to month before or next month, handle these cases.
-                if day <= today.day:
+                if day <= today.day and not today_reached:
                     month_modifier = 0
                 if not today_reached and day == today.day:
                     today_reached = True
