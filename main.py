@@ -51,7 +51,7 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
         
         for category in range(1, 25):
             for item in client.crawl_market(category):
-                with open(os.path.join(results_location, "histories", f"{item.name}.csv"), "a+") as h:
+                with open(os.path.join(results_location, "histories", f"{item.name.lower()}.csv"), "a+") as h:
                     h.write(item.history_string() + "\n")
                 f.write(f"{item}\n")
         
