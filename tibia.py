@@ -159,8 +159,7 @@ class MarketMemoryReader:
         self.last_expression = ""
         
         self.has_finished_filtering = False
-        
-    
+
     def find_current_memory(self, buy_offer: int, sell_offer: int, max_buy_offer: int, max_sell_offer: int, item_id: int):
         """Filters the readers with the current values. If all readers only have 1 value left, returns True.
 
@@ -169,6 +168,7 @@ class MarketMemoryReader:
             sell_offer (int): The current 1st sell offer.
             avg_buy_offer (int): The current maximum buy offer.
             avg_sell_offer (int): The current maximum sell offer.
+            item_id (int): The current item id.
         """
         if len(self.buy_offer_reader.addresses) != 1 and buy_offer >= 100:
             self.buy_offer_reader.filter_value(0, ctypes.c_long(buy_offer))
@@ -178,12 +178,13 @@ class MarketMemoryReader:
             self.buy_details_reader.filter_value(0, ctypes.c_long(max_buy_offer))
         if len(self.sell_details_reader.addresses) != 1 and max_sell_offer >= 100:
             self.sell_details_reader.filter_value(0, ctypes.c_long(max_sell_offer))
-        if 0 < len(self.item_id_reader.addresses) <= 3:
-            self.item_id_reader.filter_value(0, ctypes.c_int(item_id))
+        if not (0 < len(self.item_id_reader.addresses) <= 22):
+            print(f"Filtering item id {item_id}")
+            self.item_id_reader.filter_value(0, ctypes.c_uint16(item_id))
 
         if len(self.buy_offer_reader.addresses) == 1 and len(self.sell_offer_reader.addresses) == 1 and\
             len(self.buy_details_reader.addresses) == 1 and len(self.sell_details_reader.addresses) == 1 and\
-                0 < len(self.item_id_reader.addresses) <= 3:
+                (0 < len(self.item_id_reader.addresses) <= 22):
             self._calculate_memory_locations()
             self.has_finished_filtering = True
 
@@ -236,7 +237,7 @@ class MarketMemoryReader:
         self.sell_details_reader.addresses.append(sell_details_base - 8) # Total money.
         self.sell_details_reader.addresses.append(sell_details_base - 16) # Total sold.
         
-    def get_current_market_values(self, name: str) -> MarketValues:
+    def get_current_market_values(self, name: str, throw_on_duplicate: bool = False) -> MarketValues:
         """Reads the current market data from memory and creates a MarketValues object with it.
 
         Args:
@@ -258,7 +259,10 @@ class MarketMemoryReader:
         
         # Check if this memory is a duplicate of the last item. If so, probably nonexistent item.
         if current_expression == self.last_expression:
-            raise Exception("The current memory is a duplicate of the previous item.")
+            if throw_on_duplicate:
+                raise Exception("The current memory is a duplicate of the previous item.")
+            else:
+                print("The current memory is a duplicate of the previous item.")
         else:
             self.last_expression = current_expression
         
@@ -277,14 +281,13 @@ class MarketMemoryReader:
             #buy_timestamp > now_timestamp or sell_timestamp > now_timestamp or \
             #buy_timestamp < current_timestamp or sell_timestamp < current_timestamp:
             # Probably the address changed.
-            print(f"It is possible the memory address has changed: {buy_offer},{sell_offer},{buy_timestamp},{sell_timestamp}")
             self.sell_offer_reader.reset_filter()
             self.buy_offer_reader.reset_filter()
             self.sell_details_reader.reset_filter()
             self.buy_details_reader.reset_filter()
             self.item_id_reader.reset_filter()
             self.has_finished_filtering = False
-            return None
+            raise Exception("The memory address might have changed: {buy_offer},{sell_offer},{buy_timestamp},{sell_timestamp}")
         
         if buy_timestamp == self.last_buy_times[0]:
             buy_offer = buy_amount = buy_timestamp = -1
@@ -306,10 +309,11 @@ class MarketMemoryReader:
                 if now_timestamp > sell_timestamp and (now_timestamp - sell_timestamp) < 86400:
                     offers_within_24h[1] += 1
 
+        print(f"Finished reading memory: {item_id=}, {buy_offer=}, {sell_offer=}, {average_bought=}, {average_sold=}, {amount_bought=}, {amount_sold=}, {max_bought=}, {min_sold=}, {offers_within_24h=}")
         return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, max(offers_within_24h)), item_id
 
 class Client:
-    def __init__(self, possible_items: List[str]):
+    def __init__(self):
         '''
         Starts Tibia, updates it if necessary.
         '''
@@ -320,19 +324,6 @@ class Client:
         self.market_tab = "offers"
         self.market_reader: MarketMemoryReader = None
         self.id_to_name, self.name_to_id = Wiki().get_item_ids()
-        
-        # Find out the position of all items when searching for them in the market.
-        # I.e. how often to press "down" to reach it.
-        possible_items = sorted([item.lower().strip() for item in possible_items], reverse=True)
-        self.item_position_dict: Dict[str, int] = {}
-        for i, item in enumerate(possible_items):
-            matches = 0
-            for j in range(i + 1, len(possible_items)):
-                if item in possible_items[j]:
-                    matches += 1
-            self.item_position_dict[item] = matches
-            
-        print(self.item_position_dict)
 
     def start_game(self, location: str):
         """Starts Tibia in the given location.
@@ -386,13 +377,6 @@ class Client:
         """
         pyautogui.hotkey("alt", "f4")
         self._wait_until_find("images/Exit.png", click=True, cache=False)
-        time.sleep(5)
-
-        # Kill the process if it is still running.
-        if self.tibia and self.tibia.poll() is None:
-            print("Killing Tibia")
-            self.tibia.kill()
-            self.tibia = None
 
     def open_market(self):
         """
@@ -442,7 +426,7 @@ class Client:
                 if self.market_reader.has_finished_filtering:
                     break
                 
-                values = self.search_item(item)
+                values = self.search_item(item, id)
                 print(len(self.market_reader.sell_offer_reader.addresses))
                 print(len(self.market_reader.buy_offer_reader.addresses))
                 print(len(self.market_reader.sell_details_reader.addresses))
@@ -453,15 +437,22 @@ class Client:
         # Fill memory with timestamps to know if an offer in memory still belongs to the current item.
         self.search_item("tibia coins")
 
-    def crawl_market(self, category_index: int, starting_index: int = 1) -> List[MarketValues]:
+    def crawl_market(self, category_index: int, starting_index: int = 0) -> List[MarketValues]:
         """
         Crawls the market for all items by iterating through the categories.
+
+        Args:
+            category_index: The index of the category to start at.
+            starting_index: The index of the item to start at.
+        Returns:
+            A list of MarketValues objects.
         """
         results = []
 
         # Reopen the market to avoid being kicked out.
         self.close_market()
         self.wiggle()
+        next_wiggle = time.time() + 60 * 13
         self.open_market()
 
         # Find memory addresses if they haven't been found yet.
@@ -471,25 +462,32 @@ class Client:
         self._wait_until_find("images/Category.png", click=True, cache=False)
 
         # Go to the correct category.
-        pyautogui.press("down", presses=category_index)
+        pyautogui.press("down", presses=category_index - 1)
 
         # Tab to the item list. This number might have to be changed if the market is updated.
-        pyautogui.press("tab", presses=5)
+        pyautogui.press("tab", presses=10)
         
         # Go through the items quickly, except for the last one.
-        # This is to make sure the item's value is fully loaded.
+        # This is to make sure the item's value is fully loaded and we aren't rate limited.
         if starting_index > 1:
-            pyautogui.press("down", presses=starting_index - 1)
-            time.sleep(0.45)
-
-        pyautogui.press("down")
-        time.sleep(0.45)
+            pyautogui.press("down", presses=starting_index)
+            time.sleep(8)
 
         last_item_id = -1
         while True:
             if self.market_reader.has_finished_filtering:
+                # Go to next item. Wait a bit to make sure we aren't rate limited.
+                pyautogui.press("down")
+                time.sleep(0.5)
+                starting_index += 1
+
                 pyautogui.PAUSE = 0.01
-                values, id = self.market_reader.get_current_market_values("Unknown")
+
+                try:
+                    values, id = self.market_reader.get_current_market_values("Unknown")
+                except Exception as e:
+                    print(f"category: {category_index}, index: {starting_index}, Error: {e}")
+                    continue
 
                 # If the id is the same as the last one, we have reached the end of the category.
                 if id == last_item_id:
@@ -500,6 +498,8 @@ class Client:
                 else:
                     values.name = self.id_to_name[id]
 
+                print(values)
+
                 # Reading the memory resulted in weird values, try resetting.
                 if not values:
                     self.close_market()
@@ -508,11 +508,16 @@ class Client:
 
                     self._find_memory_addresses()
                     return results + self.crawl_market(category_index, starting_index)
-                else:
+                elif values.name != "Unknown":
                     results.append(values)
 
-                starting_index += 1
                 last_item_id = id
+
+                # Wiggle every once in a while to avoid being kicked out.
+                if time.time() > next_wiggle:
+                    return results + self.crawl_market(category_index, starting_index)
+            else:
+                return results + self.crawl_market(category_index, starting_index)
 
         return results
 
