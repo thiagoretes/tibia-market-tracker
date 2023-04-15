@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import re
 from memory_reader import MemoryReader
 import ctypes
+import os
 
 
 class EventData:
@@ -56,6 +57,7 @@ class Wiki:
     def get_all_marketable_items(self) -> List[str]:
         """
         Fetches all marketable item names from the tibia fandom wiki.
+        The documentation for fandom apis are available at https://www.mediawiki.org/wiki/API:Main_page.
         """
         items = []
         url = "https://tibia.fandom.com/api.php?action=query&list=categorymembers&cmtitle=Category%3AMarketable+Items&format=json&cmprop=title&cmlimit=500"
@@ -117,6 +119,31 @@ class Wiki:
         
         return event_data
 
+    def get_item_ids(self) -> Tuple[Dict[int, str], Dict[str, int]]:
+        """Fetches the items and their ids from https://tibia.fandom.com/wiki/Item_IDs
+
+        Returns:
+            Tuple[Dict[int, str], Dict[str, int]]: A tuple containing a dictionary mapping item ids to item names, and a dictionary mapping item names to item ids.
+        """
+        response = requests.get("https://tibia.fandom.com/api.php?action=parse&page=Item_IDs&format=json").json()
+        response = response["parse"]["text"]["*"]
+        
+        # Get all the item names and ids from the table.
+        items = re.findall(">([^<>]+)</a></td>\n<td>([0-9, ]+)\n</td>", response)
+
+        # Convert the ids to ints and add them to the dictionary.
+        id_to_item: Dict[int, str] = {}
+        item_to_id: Dict[str, int] = {}
+        for item in items:
+            for id in item[1].replace(" ", ",").split(","):
+                if len(id) > 0:
+                    id_value = int(id.strip())
+
+                    id_to_item[id_value] = item[0]
+                    item_to_id[item[0]] =  id_value
+
+        return id_to_item, item_to_id
+
 
 class MarketMemoryReader:
     def __init__(self):
@@ -124,6 +151,7 @@ class MarketMemoryReader:
         self.sell_details_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         self.buy_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         self.sell_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
+        self.item_id_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         
         # Values to determine if current memory belongs to the current item.
         self.last_sell_times = [0 for i in range(16)]
@@ -133,7 +161,7 @@ class MarketMemoryReader:
         self.has_finished_filtering = False
         
     
-    def find_current_memory(self, buy_offer: int, sell_offer: int, max_buy_offer: int, max_sell_offer: int):
+    def find_current_memory(self, buy_offer: int, sell_offer: int, max_buy_offer: int, max_sell_offer: int, item_id: int):
         """Filters the readers with the current values. If all readers only have 1 value left, returns True.
 
         Args:
@@ -150,9 +178,12 @@ class MarketMemoryReader:
             self.buy_details_reader.filter_value(0, ctypes.c_long(max_buy_offer))
         if len(self.sell_details_reader.addresses) != 1 and max_sell_offer >= 100:
             self.sell_details_reader.filter_value(0, ctypes.c_long(max_sell_offer))
+        if 0 < len(self.item_id_reader.addresses) <= 3:
+            self.item_id_reader.filter_value(0, ctypes.c_int(item_id))
 
         if len(self.buy_offer_reader.addresses) == 1 and len(self.sell_offer_reader.addresses) == 1 and\
-            len(self.buy_details_reader.addresses) == 1 and len(self.sell_details_reader.addresses) == 1:
+            len(self.buy_details_reader.addresses) == 1 and len(self.sell_details_reader.addresses) == 1 and\
+                0 < len(self.item_id_reader.addresses) <= 3:
             self._calculate_memory_locations()
             self.has_finished_filtering = True
 
@@ -218,6 +249,7 @@ class MarketMemoryReader:
         average_bought = (total_bought_gold // amount_bought) if amount_bought > 0 else 0
         max_sold, min_sold, total_sold_gold, amount_sold = self.sell_details_reader.read_values()
         average_sold = (total_sold_gold // amount_sold) if amount_sold > 0 else 0
+        item_id = self.item_id_reader.read_values()[0]
         
         current_expression = f"{max_bought},{min_bought},{total_bought_gold},{amount_bought},{average_bought}" +\
                              f"{max_sold},{min_sold},{total_sold_gold},{amount_sold},{average_sold}" +\
@@ -250,6 +282,7 @@ class MarketMemoryReader:
             self.buy_offer_reader.reset_filter()
             self.sell_details_reader.reset_filter()
             self.buy_details_reader.reset_filter()
+            self.item_id_reader.reset_filter()
             self.has_finished_filtering = False
             return None
         
@@ -273,7 +306,7 @@ class MarketMemoryReader:
                 if now_timestamp > sell_timestamp and (now_timestamp - sell_timestamp) < 86400:
                     offers_within_24h[1] += 1
 
-        return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, max(offers_within_24h))
+        return MarketValues(name, time.time(), sell_offer, buy_offer, average_sold, average_bought, amount_sold, amount_bought, max_sold, min_bought, max(offers_within_24h)), item_id
 
 class Client:
     def __init__(self, possible_items: List[str]):
@@ -286,6 +319,7 @@ class Client:
         self.position_cache = {}
         self.market_tab = "offers"
         self.market_reader: MarketMemoryReader = None
+        self.id_to_name, self.name_to_id = Wiki().get_item_ids()
         
         # Find out the position of all items when searching for them in the market.
         # I.e. how often to press "down" to reach it.
@@ -300,10 +334,19 @@ class Client:
             
         print(self.item_position_dict)
 
-    def start_game(self, location:str):
+    def start_game(self, location: str):
+        """Starts Tibia in the given location.
+
+        Args:
+            location (str): The location of the Tibia executable.
+        """
+        # If Tibia was closed before, remove the shared memory files. Otherwise Tibia will not start.
+        for file in os.listdir("/tmp"):
+            if file.startswith("qipc_sharedmemory"):
+                os.remove(os.path.join("/tmp", file))
+
         self.tibia: subprocess.Popen = subprocess.Popen([location])
         time.sleep(5)
-
         self._update_tibia()
 
     def _update_tibia(self):
@@ -343,6 +386,13 @@ class Client:
         """
         pyautogui.hotkey("alt", "f4")
         self._wait_until_find("images/Exit.png", click=True, cache=False)
+        time.sleep(5)
+
+        # Kill the process if it is still running.
+        if self.tibia and self.tibia.poll() is None:
+            print("Killing Tibia")
+            self.tibia.kill()
+            self.tibia = None
 
     def open_market(self):
         """
@@ -388,7 +438,7 @@ class Client:
         print("Finding relevant memory addresses with OCR.")
         
         while not self.market_reader.has_finished_filtering:
-            for item in ["tibia coins", "time ring", "stealth ring", "rope belt", "stone skin amulet", "collar of red plasma"]:
+            for item, id in [("tibia coins", 22118), ("time ring", 3053), ("stealth ring", 3049), ("rope belt", 11492), ("stone skin amulet", 3081), ("collar of red plasma", 23544)]:
                 if self.market_reader.has_finished_filtering:
                     break
                 
@@ -397,12 +447,76 @@ class Client:
                 print(len(self.market_reader.buy_offer_reader.addresses))
                 print(len(self.market_reader.sell_details_reader.addresses))
                 print(len(self.market_reader.buy_details_reader.addresses))
+                print(len(self.market_reader.item_id_reader.addresses))
                 print(values)
 
         # Fill memory with timestamps to know if an offer in memory still belongs to the current item.
         self.search_item("tibia coins")
 
-    def search_item(self, name: str) -> MarketValues:
+    def crawl_market(self, category_index: int, starting_index: int = 1) -> List[MarketValues]:
+        """
+        Crawls the market for all items by iterating through the categories.
+        """
+        results = []
+
+        # Reopen the market to avoid being kicked out.
+        self.close_market()
+        self.wiggle()
+        self.open_market()
+
+        # Find memory addresses if they haven't been found yet.
+        if not self.market_reader.has_finished_filtering:
+            self._find_memory_addresses()
+
+        self._wait_until_find("images/Category.png", click=True, cache=False)
+
+        # Go to the correct category.
+        pyautogui.press("down", presses=category_index)
+
+        # Tab to the item list. This number might have to be changed if the market is updated.
+        pyautogui.press("tab", presses=5)
+        
+        # Go through the items quickly, except for the last one.
+        # This is to make sure the item's value is fully loaded.
+        if starting_index > 1:
+            pyautogui.press("down", presses=starting_index - 1)
+            time.sleep(0.45)
+
+        pyautogui.press("down")
+        time.sleep(0.45)
+
+        last_item_id = -1
+        while True:
+            if self.market_reader.has_finished_filtering:
+                pyautogui.PAUSE = 0.01
+                values, id = self.market_reader.get_current_market_values("Unknown")
+
+                # If the id is the same as the last one, we have reached the end of the category.
+                if id == last_item_id:
+                    break
+                
+                if id not in self.id_to_name:
+                    print("Unknown item id: " + str(id) + ", category: " + str(category_index) + ", index: " + str(starting_index))
+                else:
+                    values.name = self.id_to_name[id]
+
+                # Reading the memory resulted in weird values, try resetting.
+                if not values:
+                    self.close_market()
+                    self.wiggle()
+                    self.open_market()
+
+                    self._find_memory_addresses()
+                    return results + self.crawl_market(category_index, starting_index)
+                else:
+                    results.append(values)
+
+                starting_index += 1
+                last_item_id = id
+
+        return results
+
+    def search_item(self, name: str, id: Optional[int] = None) -> MarketValues:
         """
         Searches for the specified item in the market, and returns its current highest feasible buy and sell offers, and values for the month.
         """
@@ -450,7 +564,9 @@ class Client:
 
             if self.market_reader.has_finished_filtering:
                 pyautogui.PAUSE = 0.01
-                values = self.market_reader.get_current_market_values(name)
+                values, id = self.market_reader.get_current_market_values(name)
+                item_name = self.id_to_name[id] if id in self.id_to_name else name
+                values.name = item_name
                 if not values:
                     self.close_market()
                     self.wiggle()
@@ -472,7 +588,7 @@ class Client:
                 self.market_tab = "offers"
 
             values = MarketValues(name, time.time(), sell_offer, buy_offer, int(interpreted_statistics[6]), int(interpreted_statistics[2]), int(interpreted_statistics[4]), int(interpreted_statistics[0]), int(interpreted_statistics[5]), int(interpreted_statistics[3]), approx_offers)
-            self.market_reader.find_current_memory(buy_offer, sell_offer, int(interpreted_statistics[1]), int(interpreted_statistics[5]))
+            self.market_reader.find_current_memory(buy_offer, sell_offer, int(interpreted_statistics[1]), int(interpreted_statistics[5]), id)
             
             return values
         except pyautogui.FailSafeException as e:

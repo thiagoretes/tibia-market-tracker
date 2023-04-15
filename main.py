@@ -35,63 +35,6 @@ def write_events(results_location: str):
         print(f"Writing events failed: {e}")
 
 
-def observe_items(email: str, password: str, tibia_location: str, results_location: str):
-    """
-    Observes the time of day at which items are bought or sold.
-    """
-    client = Client()
-    client.start_game(tibia_location)
-    client.login_to_game(email, password)
-
-    client.open_market()
-    price_dict = {}
-
-    while True:
-        with open("observed_items.txt", "r") as f:
-            for item in f.readlines():
-                item_name = item.replace("\n", "").lower()
-
-                with open(os.path.join(results_location, "offers", f"{item_name}.csv"), "a+") as t:
-                    current_values = client.search_item(item_name)
-
-                    # Ignore if OCR failed.
-                    if not "-1" in str(current_values):
-                        if item not in price_dict:
-                            price_dict[item] = current_values
-
-                        past_values = price_dict[item]
-
-                        # Check if prices changed in a way that indicates a successful trade, or new offer.
-                        if current_values.buy_offer < past_values.buy_offer:
-                            t.write(f"bought,{current_values.buy_offer},{datetime.now()}\n")
-                        elif current_values.buy_offer > past_values.buy_offer:
-                            t.write(f"buyOffer,{current_values.buy_offer},{datetime.now()}\n")
-
-                        if current_values.sell_offer > past_values.sell_offer:
-                            t.write(f"sold,{current_values.sell_offer},{datetime.now()}\n")
-                        elif current_values.sell_offer < past_values.sell_offer:
-                            t.write(f"sellOffer,{current_values.sell_offer},{datetime.now()}\n")
-
-                        print(current_values)
-                        price_dict[item] = current_values
-                    else:
-                        print(f"Retrieving values for {item_name} failed: {current_values}")
-                
-        client.close_market()
-        client.wiggle()
-        client.open_market()
-        
-        time.sleep(2 * 60)
-
-        # Stop at server-save.
-        now = datetime.now()
-        if now.hour == 9 and now.minute >= 55:
-            break
-    
-    client.exit_tibia()
-    turn_off_display()
-            
-
 def do_market_search(email: str, password: str, tibia_location: str, results_location: str):
     write_events(results_location)
 
