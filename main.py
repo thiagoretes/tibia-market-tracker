@@ -39,7 +39,7 @@ def do_market_search(email: str, password: str, tibia_location: str, results_loc
     write_events(results_location)
 
     with open(os.path.join(results_location, "fullscan_tmp.csv"), "w+") as f:
-        f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ApproxOffers\n")
+        f.write("Name,SellPrice,BuyPrice,AvgSellPrice,AvgBuyPrice,Sold,Bought,Profit,RelProfit,PotProfit,ActiveTraders\n")
         
         client = Client()
         client.start_game(tibia_location)

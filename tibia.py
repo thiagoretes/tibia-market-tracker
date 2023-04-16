@@ -35,11 +35,11 @@ class MarketValues:
         self.profit -= (min(int(self.buy_offer * 0.02), 250000) + min(int(self.sell_offer * 0.02), 250000))
         self.rel_profit: float = round(self.profit / self.buy_offer, 2) if self.buy_offer > 0 else 0
         self.potential_profit: int = self.profit * min(sold, bought)
-        self.approx_offers: int = approx_offers
+        self.active_traders: int = approx_offers
         self.name = name
 
     def __str__(self) -> str:
-        return f"{self.name.lower()},{self.sell_offer},{self.buy_offer},{self.month_sell_offer},{self.month_buy_offer},{self.sold},{self.bought},{self.profit},{self.rel_profit},{self.potential_profit},{self.approx_offers}"
+        return f"{self.name.lower()},{self.sell_offer},{self.buy_offer},{self.month_sell_offer},{self.month_buy_offer},{self.sold},{self.bought},{self.profit},{self.rel_profit},{self.potential_profit},{self.active_traders}"
 
     def history_string(self) -> str:
         """Returns the relevant historic values of the object as a string, separated by commas.
@@ -48,7 +48,7 @@ class MarketValues:
         Returns:
             str: A string containing all the values of the object, separated by commas.
         """
-        return f"{self.sell_offer},{self.buy_offer},{self.sold},{self.bought},{self.approx_offers},{self.time}"
+        return f"{self.sell_offer},{self.buy_offer},{self.sold},{self.bought},{self.active_traders},{self.time}"
 
 class Wiki:
     def __init__(self):
@@ -152,10 +152,11 @@ class MarketMemoryReader:
         self.buy_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         self.sell_offer_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
         self.item_id_reader: MemoryReader = MemoryReader(process=self.buy_details_reader.process)
+        self.past_offers = 32
         
         # Values to determine if current memory belongs to the current item.
-        self.last_sell_times = [0 for i in range(16)]
-        self.last_buy_times = [0 for i in range(16)]
+        self.last_sell_times = [(0, 0) for i in range(self.past_offers)]
+        self.last_buy_times = [(0, 0) for i in range(self.past_offers)]
         self.last_expression = ""
         self.last_id = 0
         
@@ -220,7 +221,7 @@ class MarketMemoryReader:
         self.sell_offer_reader.addresses.append(sell_offer_base - 24) # Timestamp.
         
         # Add more than 1st offers to memory reader.
-        for i in range(1, 8):
+        for i in range(1, self.past_offers):
             ith_buy_offer = [x + 48 * i for x in self.buy_offer_reader.addresses[:3]]
             ith_sell_offer = [x + 48 * i for x in self.sell_offer_reader.addresses[:3]]
             self.buy_offer_reader.addresses.extend(ith_buy_offer)
@@ -280,6 +281,10 @@ class MarketMemoryReader:
         
         buy_offer, buy_amount, buy_timestamp = buy_offer_values[:3]
         sell_offer, sell_amount, sell_timestamp = sell_offer_values[:3]
+
+        # Timestamps are read as 64 bit, but only the last 32 bits are used.
+        sell_timestamp = sell_timestamp & 0xFFFFFFFF
+        buy_timestamp = buy_timestamp & 0xFFFFFFFF
         
         if not name.lower() == "golden helmet" and\
              sell_offer <= 0 or sell_offer > 8000000000 or \
@@ -297,24 +302,30 @@ class MarketMemoryReader:
             self.last_id = 0
             self.last_expression = ""
             raise Exception(f"The memory address might have changed: {item_id=},{buy_offer=},{sell_offer=},{buy_timestamp=},{sell_timestamp=}")
-        
-        if buy_timestamp == self.last_buy_times[0]:
+
+        # If the item id is not the same as the last one, but the timestamp is the same as the last one, then the values aren't theirs.
+        if buy_timestamp == self.last_buy_times[0][0] and item_id != self.last_buy_times[0][1]:
             buy_offer = buy_amount = buy_timestamp = -1
-        if sell_timestamp == self.last_sell_times[0]:
+        if sell_timestamp == self.last_sell_times[0][0] and item_id != self.last_sell_times[0][1]:
             sell_offer = sell_amount = sell_timestamp = -1
             
         offers_within_24h = [0, 0]
         
-        for i in range(8):
+        for i in range(self.past_offers):
             b_, b__, buy_timestamp = buy_offer_values[i * 3 : (i + 1) * 3]
             s_, s__, sell_timestamp = sell_offer_values[i * 3 : (i + 1) * 3]
+
+            # timestamp is read as a long, but it is a 32 bit int. So we need to trim it.
+            sell_timestamp = sell_timestamp & 0xFFFFFFFF
+            buy_timestamp = buy_timestamp & 0xFFFFFFFF
             
-            if buy_timestamp != self.last_buy_times[i]:
-                self.last_buy_times[i] = buy_timestamp
+            if buy_timestamp != self.last_buy_times[i][0] or item_id == self.last_buy_times[i][1]:
+                self.last_buy_times[i] = (buy_timestamp, item_id)
                 if now_timestamp > buy_timestamp and (now_timestamp - buy_timestamp) < 86400:
                     offers_within_24h[0] += 1
-            if sell_timestamp != self.last_sell_times[i]:
-                self.last_sell_times[i] = sell_timestamp
+
+            if sell_timestamp != self.last_sell_times[i][0] or item_id == self.last_sell_times[i][1]:
+                self.last_sell_times[i] = (sell_timestamp, item_id)
                 if now_timestamp > sell_timestamp and (now_timestamp - sell_timestamp) < 86400:
                     offers_within_24h[1] += 1
 
