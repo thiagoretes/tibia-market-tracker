@@ -289,7 +289,8 @@ class MarketMemoryReader:
         if not name.lower() == "golden helmet" and\
              sell_offer <= 0 or sell_offer > 8000000000 or \
              buy_offer <= 0 or buy_offer > 8000000000 or \
-                (not was_duplicate and self.last_id == item_id):
+                (not was_duplicate and self.last_id == item_id) or \
+            len(set(item_ids)) > 2:
             #buy_timestamp > now_timestamp or sell_timestamp > now_timestamp or \
             #buy_timestamp < current_timestamp or sell_timestamp < current_timestamp:
             # Probably the address changed.
